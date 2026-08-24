@@ -34,7 +34,41 @@ resource "aws_key_pair" "deployer" {
   public_key = file("~/.ssh/travelmemory-key.pub")
 }
 
+# ------------------------------------------------------------------------------
+# IAM Role and Instance Profile for EC2 Instances
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "ec2_role" {
+  name = "travelmemory-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = { Name = "travelmemory-ec2-role" }
+}
+
+# Attach AWS Systems Manager (SSM) policy to enable secure management/logging
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Create IAM Instance Profile to attach to EC2 instances
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "travelmemory-ec2-instance-profile"
+  role = aws_iam_role.ec2_role.name
+}
+
+# ------------------------------------------------------------------------------
 # VPC and Subnets
+# ------------------------------------------------------------------------------
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
@@ -62,7 +96,9 @@ resource "aws_subnet" "private" {
   tags              = { Name = "travelmemory-private-subnet" }
 }
 
+# ------------------------------------------------------------------------------
 # Gateways & Route Tables
+# ------------------------------------------------------------------------------
 resource "aws_eip" "nat" {
   domain = "vpc"
 }
@@ -101,7 +137,9 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
+# ------------------------------------------------------------------------------
 # Security Groups
+# ------------------------------------------------------------------------------
 resource "aws_security_group" "web_sg" {
   name        = "travelmemory-web-sg"
   description = "Public Web Server SG"
@@ -157,7 +195,7 @@ resource "aws_security_group" "db_sg" {
     from_port       = 22
     to_port         = 22
     protocol        = "tcp"
-    security_groups = [aws_security_group.web_sg.id]
+    cidr_blocks = ["10.0.1.0/24"]
   }
 
   egress {
@@ -168,23 +206,31 @@ resource "aws_security_group" "db_sg" {
   }
 }
 
+# ------------------------------------------------------------------------------
 # EC2 Instances
+# ------------------------------------------------------------------------------
 resource "aws_instance" "web" {
-  ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
-  instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.public.id
-  key_name               = aws_key_pair.deployer.key_name
+  ami                  = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
+  instance_type        = "t3.micro"
+  subnet_id            = aws_subnet.public.id
+  key_name             = aws_key_pair.deployer.key_name
   vpc_security_group_ids = [aws_security_group.web_sg.id]
+  
+  # Attached IAM Instance Profile
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
   tags = { Name = "TravelMemory-WebServer" }
 }
 
 resource "aws_instance" "db" {
-  ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
-  instance_type          = "t3.micro"
-  subnet_id              = aws_subnet.private.id
-  key_name               = aws_key_pair.deployer.key_name
+  ami                  = var.ami_id != "" ? var.ami_id : data.aws_ami.ubuntu.id
+  instance_type        = "t3.micro"
+  subnet_id            = aws_subnet.private.id
+  key_name             = aws_key_pair.deployer.key_name
   vpc_security_group_ids = [aws_security_group.db_sg.id]
+  
+  # Attached IAM Instance Profile
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
   tags = { Name = "TravelMemory-DBServer" }
 }

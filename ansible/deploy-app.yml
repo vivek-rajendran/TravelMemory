@@ -5,7 +5,7 @@
   vars:
     app_dir: /var/www/travelmemory
     repo_url: https://github.com/vivek-rajendran/TravelMemory.git
-    db_ip: "10.0.2.11"
+    db_ip: "10.0.2.141"
     app_port: "12001"
 
   tasks:
@@ -64,6 +64,8 @@
       command: npm run build
       args:
         chdir: "{{ app_dir }}/frontend"
+      environment:
+        REACT_APP_BACKEND_URL: "http://65.0.3.141"
       become: false
 
     # --- Nginx Configuration ---
@@ -86,7 +88,7 @@
               }
 
               # Backend API Proxy
-              location /url {
+              location ~ ^/(url|trip) {
                   proxy_pass http://127.0.0.1:{{ app_port }};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
