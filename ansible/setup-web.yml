@@ -1,0 +1,33 @@
+---
+- name: Configure Web & Node.js Server
+  hosts: web
+  become: true
+  tasks:
+
+    - name: Install system prerequisite packages
+      apt:
+        name:
+          - curl
+          - git
+          - nginx
+        state: present
+        update_cache: yes
+
+    - name: Add NodeSource Node.js 20.x repository
+      shell: curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+
+    - name: Install Node.js & npm
+      apt:
+        name: nodejs
+        state: present
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
+
+    - name: Ensure Nginx is running and enabled
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes

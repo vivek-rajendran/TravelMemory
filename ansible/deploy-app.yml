@@ -1,0 +1,116 @@
+---
+- name: Deploy Travel Memory MERN Application
+  hosts: web
+  become: true
+  vars:
+    app_dir: /var/www/travelmemory
+    repo_url: https://github.com/vivek-rajendran/TravelMemory.git
+    db_ip: "10.0.2.11"
+    app_port: "12001"
+
+  tasks:
+
+    - name: Ensure target deployment directory exists
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Clone or pull application repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+        accept_hostkey: yes
+      become: false
+
+    # --- Backend Setup ---
+    - name: Install Backend Dependencies
+      npm:
+        path: "{{ app_dir }}/backend"
+      become: false
+
+    - name: Create Backend .env file
+      copy:
+        dest: "{{ app_dir }}/backend/.env"
+        content: |
+          PORT={{ app_port }}
+          MONGO_URI=mongodb://{{ db_ip }}:27017/travelmemory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Start or restart Backend using PM2
+      shell: |
+        pm2 describe travelmemory-backend > /dev/null 2>&1 && pm2 restart travelmemory-backend || pm2 start index.js --name travelmemory-backend
+      args:
+        chdir: "{{ app_dir }}/backend"
+      become: false
+
+    - name: Save PM2 process list
+      command: pm2 save
+      become: false
+
+    # --- Frontend Setup ---
+    - name: Install Frontend Dependencies
+      npm:
+        path: "{{ app_dir }}/frontend"
+      become: false
+
+    - name: Build Frontend static assets
+      command: npm run build
+      args:
+        chdir: "{{ app_dir }}/frontend"
+      become: false
+
+    # --- Nginx Configuration ---
+    - name: Configure Nginx site definition
+      copy:
+        dest: /etc/nginx/sites-available/travelmemory
+        content: |
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+
+              server_name _;
+
+              # Frontend Static Files (React build output)
+              root {{ app_dir }}/frontend/build;
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              # Backend API Proxy
+              location /url {
+                  proxy_pass http://127.0.0.1:{{ app_port }};
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable site by creating symlink
+      file:
+        src: /etc/nginx/sites-available/travelmemory
+        dest: /etc/nginx/sites-enabled/travelmemory
+        state: link
+
+    - name: Remove default Nginx site symlink if exists
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Reload Nginx service
+      systemd:
+        name: nginx
+        state: reloaded
