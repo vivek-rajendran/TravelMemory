@@ -1,0 +1,7 @@
+# Private SSH Keys
+*.pem
+travelmemory-key
+id_rsa
+
+# Ansible retry files
+*.retry
